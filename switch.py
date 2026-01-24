@@ -25,19 +25,7 @@ def register_response_received():
     log.append(f"Register Response received\n")
     write_to_log(log) 
 
-# For the parameter "routing_table", it should be a list of lists in the form of [[...], [...], ...]. 
-# Within each list in the outermost list, the first element is <Switch ID>. The second is <Dest ID>, and the third is <Next Hop>.
-
-# "Routing Update" Format is below:
-# Timestamp
-# Routing Update 
-# <Switch ID>,<Dest ID>:<Next Hop>
-# ...
-# ...
-# Routing Complete
-# 
-# You should also include all of the Self routes in your routing_table argument -- e.g.,  Switch (ID = 4) should include the following entry: 		
-# 4,4:4
+######################################################################################
 
 def routing_table_update(routing_table):
     log = []
@@ -73,6 +61,8 @@ def write_to_log(log):
         log_file.write("\n\n")
         # Write to log
         log_file.writelines(log)
+
+####################################################################################
 
 def init_socket(port_number):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
