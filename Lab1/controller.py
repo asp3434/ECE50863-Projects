@@ -196,7 +196,7 @@ def main():
     switches = []
     timer_set = datetime.now() + timedelta(seconds=10)
     ###### bootstrap process ######
-    while (n < (m-1) and (datetime.now() < timer_set)):
+    while ((n < m) and (datetime.now() < timer_set)):
         try:
             data, addr = s.recvfrom(4096)
             msg = data.decode('utf-8')
@@ -220,7 +220,7 @@ def main():
     for switch in range(num_switches):
         switch_route_table= []
         for destination in range(num_switches):
-            row = [switch, destination, switch_dict[switch][destination][1], switch_dict[switch][destination][0]]
+            row = [switch, destination, switch_dict[switch][destination][1]]
             switch_route_table.append(row)
         s.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
 
