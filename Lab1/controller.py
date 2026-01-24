@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 import socket
 import json
 
-LOG_FILE = "../Controller.log"
+LOG_FILE = "Controller.log"
 
 def register_request_received(switch_id):
     log = []
