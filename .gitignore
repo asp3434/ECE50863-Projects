@@ -1,7 +1,9 @@
-Lab1/src/Controller.log
+Lab1/Controller.log
 Lab1/src/switch0.log
 Lab1/src/switch1.log
 Lab1/src/switch2.log
 
 .idea/
-Lab1/example_routes/
+Lab1/src/graph_2.txt
+Lab1/src/graph_3.txt
+Lab1/src/graph_6.txt
