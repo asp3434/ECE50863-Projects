@@ -178,24 +178,28 @@ def find_neighbors(route_table):
 
 def main():
 
-    #Check for number of arguments and exit if there the incorrect amount of arguments
+    ###### bootstrap process ######
+    #Check for number of arguments and exit if there are the incorrect amount of arguments
     num_args = len(sys.argv)
     if num_args != 3:
         print ("Usage: controller.py <port> <config file>\n")
         print (f"Number of arguments: {num_args}. Invalid number of arguments.\n")
         sys.exit(1)
 
+    #initialize socket
     port = int(sys.argv[1])
     s = init_socket(port)
     s.settimeout(5)
 
+    #convert text file to a list and identify the number of switches we expect to check in
     route_table_raw = convert_config(sys.argv[2])
     m = int(route_table_raw[0][0])
 
     n=0
     switches = []
     timer_set = datetime.now() + timedelta(seconds=10)
-    ###### bootstrap process ######
+
+    #waiting for check-in from each switch
     while ((n < m) and (datetime.now() < timer_set)):
         try:
             data, addr = s.recvfrom(4096)
@@ -210,13 +214,16 @@ def main():
 
     num_switches = len(switches)
 
+    #send response to each switch that logged in
     for switch in switches:
         s.sendto(str(int(switch[0])+10).encode('utf-8'), ('127.0.0.1', switch[1]))
         register_response_sent(int(switch[0]))
 
+    # calculate routes and log routes
     switch_dict, path_dict = find_neighbors(route_table_raw)
     routing_table_update(num_switches, switch_dict)
 
+    #sending routing information to each switch
     for switch in range(num_switches):
         switch_route_table= []
         for destination in range(num_switches):
