@@ -189,7 +189,6 @@ def main():
     #initialize socket
     port = int(sys.argv[1])
     s = init_socket(port)
-    s.settimeout(5)
 
     #convert text file to a list and identify the number of switches we expect to check in
     route_table_raw = convert_config(sys.argv[2])
@@ -197,20 +196,16 @@ def main():
 
     n=0
     switches = []
-    timer_set = datetime.now() + timedelta(seconds=10)
 
     #waiting for check-in from each switch
-    while ((n < m) and (datetime.now() < timer_set)):
-        try:
-            data, addr = s.recvfrom(4096)
-            msg = data.decode('utf-8')
+    while n < m:
+        data, addr = s.recvfrom(4096)
+        msg = data.decode('utf-8')
 
-            switches.append((msg, addr[1]))
+        switches.append((msg, addr[1]))
 
-            register_request_received(msg)
-            n += 1
-        except socket.timeout:
-            break
+        register_request_received(msg)
+        n += 1
 
     num_switches = len(switches)
 
@@ -229,6 +224,7 @@ def main():
         for destination in range(num_switches):
             row = [switch, destination, switch_dict[switch][destination][1]]
             switch_route_table.append(row)
+        #print(switch_route_table)
         s.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
 
     # print("switch dictionary: ", switch_dict)
