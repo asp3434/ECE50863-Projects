@@ -74,17 +74,46 @@ def init_socket(port_number):
     sock.bind((udp_host, udp_port))
     return sock
 
-def listen(sock, timeout, neighbors):
+########## Listener Functions ##########
+def listen(sock, timeout, neighbors, controller_port):
+    time_tracker = [[neighbor[0], datetime.now()] for neighbor in neighbors]
+    neighbors_list_simple = [neighbor[0] for neighbor in neighbors]
     while True:
-        data, addr = sock.recvfrom(1024)
+        data, addr = sock.recvfrom(4096)
+        neighbor_id = addr[1] - 4000
+        if addr[1] == controller_port:
+            route_table = json.loads(data.decode('utf-8'))
+            routing_table_update(route_table)
 
+        elif neighbor_id not in neighbors_list_simple:
+            neighbors_list_simple.append(neighbor_id)
+            neighbors.append([neighbor_id, True])
+            time_tracker.append([neighbor_id, datetime.now()])
+
+            neighbors_list_simple.sort()
+            neighbors.sort()
+            time_tracker.sort()
+
+            neighbor_alive(neighbor_id)
+
+        else:
+            for i in range(len(neighbors)):
+                if neighbors[i][0] == neighbor_id:
+
+
+def update_neighbor_time(time_tracker, neighbor_id):
+    for neighbor in time_tracker:
+        if neighbor[0] == neighbor_id:
+            neighbor[1] = datetime.now()
+
+########### Worker Functions ###########
 def work(sock, k, neighbors, my_id, controller_port, topology_change):
     timer_set = 0
     while True:
         if datetime.now() >= timer_set:
             send_keep_alive(sock, neighbors, my_id)
             if topology_change:
-                send_topology(sock, controller_port)
+                send_topology(sock, controller_port, neighbors, my_id)
                 topology_change = False
             timer_set = datetime.now() + timedelta(seconds=k)
 
@@ -94,8 +123,13 @@ def send_keep_alive(sock, neighbors, my_id):
         if neighbor[1]:
             sock.sendto(keep_alive.encode('utf-8'), ("127.0.0.1", 4000 + neighbor[0]))
 
-def send_topology(sock, controller_port):
-
+def send_topology(sock, controller_port, neighbors, my_id):
+    topology_list = [[my_id]]
+    for neighbor in neighbors:
+        topology_list.append(neighbor)
+    print(topology_list)
+    new_topology = json.dumps(topology_list)
+    sock.sendto(new_topology.encode('utf-8'), ("127.0.0.1", controller_port))
 
 ####################################################################################
 
@@ -145,7 +179,7 @@ def main():
     routing_table_update(route_table)
     ###### boot strap process finished ######
 
-    ######### begin part 2, periodic function and initialization######
+    #########periodic function and initialization######
     n_list = [route_table[i][2] for i in range(len(route_table)) if route_table[i][2] != my_id]
     n_list = list(set(n_list))
     n_list.sort()
