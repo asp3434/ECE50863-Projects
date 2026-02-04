@@ -37,19 +37,11 @@ def routing_table_update(routing_table):
 
 ######################################################################################
 
-# "Unresponsive/Dead Neighbor Detected" Format:
-# Timestamp
-# Neighbor Dead <Neighbor ID>
-
 def neighbor_dead(switch_id):
     log = []
     log.append(str(datetime.time(datetime.now())) + "\n")
     log.append(f"Neighbor Dead {switch_id}\n")
     write_to_log(log) 
-
-# "Unresponsive/Dead Neighbor comes back online" Format:
-# Timestamp
-# Neighbor Alive <Neighbor ID>
 
 def neighbor_alive(switch_id):
     log = []
@@ -76,6 +68,7 @@ def init_socket(port_number):
 
 ########## Listener Functions ##########
 def listen(sock, timeout, neighbors, controller_port):
+    global topology_change
     time_tracker = [[neighbor[0], datetime.now()] for neighbor in neighbors]
     neighbors_list_simple = [neighbor[0] for neighbor in neighbors]
     while True:
@@ -84,6 +77,7 @@ def listen(sock, timeout, neighbors, controller_port):
         if addr[1] == controller_port:
             route_table = json.loads(data.decode('utf-8'))
             routing_table_update(route_table)
+            
 
         elif neighbor_id not in neighbors_list_simple:
             neighbors_list_simple.append(neighbor_id)
@@ -94,12 +88,19 @@ def listen(sock, timeout, neighbors, controller_port):
             neighbors.sort()
             time_tracker.sort()
 
+            topology_change = True
             neighbor_alive(neighbor_id)
 
         else:
-            for i in range(len(neighbors)):
-                if neighbors[i][0] == neighbor_id:
+            update_neighbor_time(time_tracker, neighbor_id)
 
+        for i in range(len(time_tracker)):
+            if datetime.now() >= time_tracker[i][1] + timedelta(seconds=timeout):
+                if neighbors[i][1] == True:
+                    neighbors[i][1] = False
+                    topology_change = True
+                    neighbor_dead(time_tracker[i][0])
+                
 
 def update_neighbor_time(time_tracker, neighbor_id):
     for neighbor in time_tracker:
@@ -107,8 +108,9 @@ def update_neighbor_time(time_tracker, neighbor_id):
             neighbor[1] = datetime.now()
 
 ########### Worker Functions ###########
-def work(sock, k, neighbors, my_id, controller_port, topology_change):
-    timer_set = 0
+def work(sock, k, neighbors, my_id, controller_port):
+    global topology_change
+    timer_set = datetime.now()
     while True:
         if datetime.now() >= timer_set:
             send_keep_alive(sock, neighbors, my_id)
@@ -127,7 +129,6 @@ def send_topology(sock, controller_port, neighbors, my_id):
     topology_list = [[my_id]]
     for neighbor in neighbors:
         topology_list.append(neighbor)
-    print(topology_list)
     new_topology = json.dumps(topology_list)
     sock.sendto(new_topology.encode('utf-8'), ("127.0.0.1", controller_port))
 
@@ -136,10 +137,11 @@ def send_topology(sock, controller_port, neighbors, my_id):
 def main():
 
     global LOG_FILE
+    global topology_change
 
     #Check for number of arguments and exit if there the incorrect amount of arguments
     num_args = len(sys.argv)
-    if num_args != 4 or num_args != 6:
+    if num_args != 4 and num_args != 6:
         print ("switch.py <Id_self> <Controller hostname> <Controller Port>\n")
         print("OR\n")
         print("switch.py <Id_self> <Controller hostname> <Controller Port> -f <neighbor-ID>\n")
@@ -188,6 +190,7 @@ def main():
     ######## Simon says: don't talk to your neighbor ########
     if num_args == 6:
         dead_neighbor = int(sys.argv[5])
+        failed_status = True
         for neighbor in neighbors:
             if neighbor[0] == dead_neighbor:
                 neighbor[1] = False
@@ -198,8 +201,8 @@ def main():
     timeout = k * 3
     topology_change = False
 
-    #start listener and worker threads
-    t_listen = threading.Thread(target=listen, args=(s, timeout, neighbors))
+    # start listener and worker threads
+    t_listen = threading.Thread(target=listen, args=(s, timeout, neighbors, controller_port))
     t_work = threading.Thread(target=work, args=(s, k, neighbors, my_id, controller_port))
 
     t_listen.start()
