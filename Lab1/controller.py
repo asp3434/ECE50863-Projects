@@ -13,6 +13,7 @@ import json
 import threading
 
 LOG_FILE = "Controller.log"
+alive = []
 
 def register_request_received(switch_id):
     log = []
@@ -31,6 +32,8 @@ def routing_table_update(num_switches, routing_table):
     log.append(str(datetime.time(datetime.now())) + "\n")
     log.append("Routing Update\n")
     for switch in range(num_switches):
+        if not alive[switch]:
+            continue
         for destination in range(num_switches):
             row = [switch, destination, routing_table[switch][destination][1], routing_table[switch][destination][0]]
             log.append(f"{row[0]},{row[1]}:{row[2]},{row[3]}\n")
@@ -217,7 +220,29 @@ def work(sock, route_table_raw, num_switches, switches):
                                 elif dead_link[0] !=0:
                                     track_dead_links.append(True)
                             if True not in track_dead_links:
-                                topology_update_switch_dead(neighbor_id)
+                                if alive[neighbor_id]:
+                                    topology_update_switch_dead(neighbor_id)
+                                    alive[neighbor_id] = False
+                                routing_table_update(num_switches, new_switch_dict)
+                                
+                                 #sending routing information to each switch
+                                for switch in range(num_switches):
+                                    switch_route_table= []
+                                    for destination in range(num_switches):
+                                        row = [switch, destination, new_switch_dict[switch][destination][1]]
+                                        switch_route_table.append(row)
+                                    #print(switch_route_table)
+                                    sock.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
+                                    
+                            else:
+                                 #sending routing information to each switch
+                                for switch in range(num_switches):
+                                    switch_route_table= []
+                                    for destination in range(num_switches):
+                                        row = [switch, destination, new_switch_dict[switch][destination][1]]
+                                        switch_route_table.append(row)
+                                    #print(switch_route_table)
+                                    sock.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
                             
                         elif ((row[0] == switch_id and row[1] == int(neighbor_id)) or (row[1] == switch_id and row[0] == int(neighbor_id))) and (neighbor[1] == True) and (row[2] == 9999):
                             new_switch_dict, new_path_dict = find_neighbors(new_route_table)
@@ -235,10 +260,22 @@ def work(sock, route_table_raw, num_switches, switches):
                             if switch_status == False:
                                 i = new_route_table.index(row)
                                 row[2] = route_table_raw[i][2]
+
+                                new_switch_dict, new_path_dict = find_neighbors(new_route_table)
+                                
                                 topology_update_switch_alive(neighbor_id)
-                            
-            new_switch_dict, new_path_dict = find_neighbors(new_route_table)
-            
+                                alive[neighbor_id] = True
+                                routing_table_update(num_switches, new_switch_dict)
+                                
+                                #sending routing information to each switch
+                                for switch in range(num_switches):
+                                    switch_route_table= []
+                                    for destination in range(num_switches):
+                                        row = [switch, destination, new_switch_dict[switch][destination][1]]
+                                        switch_route_table.append(row)
+                                    #print(switch_route_table)
+                                    sock.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
+                        
             #sending routing information to each switch
             for switch in range(num_switches):
                 switch_route_table= []
@@ -256,6 +293,7 @@ def main():
     global topology_change
     topology_change = False
     global topology_msg
+    global alive
     
     ###### bootstrap process ######
     #Check for number of arguments and exit if there are the incorrect amount of arguments
@@ -286,7 +324,9 @@ def main():
         register_request_received(msg)
         n += 1
 
+    switches.sort(key=lambda x: int(x[0]))
     num_switches = len(switches)
+    alive = [True] * num_switches
 
     #send response to each switch that logged in
     for switch in switches:
