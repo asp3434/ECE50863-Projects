@@ -276,6 +276,10 @@ def work(sock, route_table_raw, num_switches, switches):
                                     #print(switch_route_table)
                                     sock.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
                         
+            #quick hack to fix an error that was seen
+            if 'new_switch_dict' not in locals():
+                new_switch_dict, new_path_dict = find_neighbors(new_route_table)
+
             #sending routing information to each switch
             for switch in range(num_switches):
                 switch_route_table= []
@@ -315,16 +319,26 @@ def main():
     switches = []
 
     #waiting for check-in from each switch
+    dead_links = []
     while n < m:
         data, addr = s.recvfrom(4096)
-        msg = data.decode('utf-8')
+        msg = json.loads(data.decode('utf-8'))
 
-        switches.append((msg, addr[1]))
-
-        register_request_received(msg)
+        #normal logging of switch check-in
+        if type(msg) == int:
+            switches.append((msg, addr[1]))
+            register_request_received(msg)
+        
+        #logging in case there is a dead link on startup
+        else:
+            switches.append((msg[0], addr[1]))
+            dead_links.append((msg[0], msg[1]))
+            register_request_received(msg[0])
         n += 1
 
+    #sort the switches in case they aren't started in sequential order
     switches.sort(key=lambda x: int(x[0]))
+    
     num_switches = len(switches)
     alive = [True] * num_switches
 
@@ -333,12 +347,21 @@ def main():
         s.sendto(str(int(switch[0])+10).encode('utf-8'), ('127.0.0.1', switch[1]))
         register_response_sent(int(switch[0]))
 
+    #reconfigure the routing table to account for dead links
+    for row in route_table_raw:
+        if route_table_raw.index(row) == 0:
+            continue
+        for dead in dead_links:
+            if (row[0] == dead[0] and row[1] == dead[1]) or (row[1] == dead[0] and row[0] == dead[1]):
+                row[2] = 9999
+    
+    #log the dead links
+    for row in dead_links:            
+        topology_update_link_dead(row[0], row[1])
+                
     # calculate routes and log routes
     switch_dict, path_dict = find_neighbors(route_table_raw)
     routing_table_update(num_switches, switch_dict)
-
-    # print(f"Switch Dictionary: {switch_dict}")
-    # print(f"Path Dictionary {path_dict}")
 
     #sending routing information to each switch
     for switch in range(num_switches):

@@ -160,8 +160,15 @@ def main():
     controller_port = int(sys.argv[3])
     controller_name = sys.argv[2]
 
+    #establish where the dead link is
+    if num_args == 6:
+        dead_neighbor = int(sys.argv[5])
+        msg = json.dumps([my_id, dead_neighbor])
+    else:
+        msg = json.dumps(my_id)
+    
     #send message to controller to initialize comms
-    s.sendto(str(my_id).encode('utf-8'), (controller_name, controller_port))
+    s.sendto(msg.encode('utf-8'), (controller_name, controller_port))
     register_request_sent()
 
     #wait for a response
@@ -182,20 +189,22 @@ def main():
     ###### boot strap process finished ######
 
     #########periodic function and initialization######
+    
+    # making a list to figure out who my neighbors are.... It has something to do with establishing my dead neighbors. 
+    # I think it's for some logic that doesn't work. Maybe it's for when a link dies. The key may be setting the "failed_status"
     n_list = [route_table[i][2] for i in range(len(route_table)) if route_table[i][2] != my_id]
     n_list = list(set(n_list))
     n_list.sort()
     neighbors = [[n_list[i], True] for i in range(len(n_list))]
 
-    ######## Simon says: don't talk to your neighbor ########
+    # Simon says: don't talk to your neighbor
     if num_args == 6:
-        dead_neighbor = int(sys.argv[5])
         failed_status = True
         for neighbor in neighbors:
             if neighbor[0] == dead_neighbor:
                 neighbor[1] = False
                 break
-
+            
     #initialize timeout and message interval
     k = 2
     timeout = k * 3
