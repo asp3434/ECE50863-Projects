@@ -90,32 +90,39 @@ def convert_config(config):
 def find_neighbors(route_table):
 
     switch_dict = {}
-    #first pass
+    base_dict = {}
+    
+    #first pass, this reads in all the values from the route_table and send them to a dictionary
     num_switches = int(route_table[0][0])
     for switch in range(num_switches):
-        distances = [(9999, -1) for i in range(int(route_table[0][0]))]
+        distances = [(9999, -1) for i in range(num_switches)]
 
+        #distance to yourself is always 0
         distances[switch] = (0, switch)
-        for row in route_table:
-            if len(row) == 1:
-                continue
-            elif int(row[0]) == switch:
-                w = int(row[2])
+        
+        for row in route_table[1:]:
+            
+            #adding distances for the switch
+            if int(row[0]) == switch:
+                dst = int(row[2])
+                
                 #9999 is invalid distance
-                if w != 9999:
-                    distances[int(row[1])] = (w, int(row[1]))
+                if dst != 9999:
+                    distances[int(row[1])] = (dst, int(row[1]))
+                    
             elif int(row[1]) == switch:
-                w = int(row[2])
+                dst = int(row[2])
                 #9999 is invalid distance
-                if w != 9999:
-                    distances[int(row[0])] = (w, int(row[0]))
+                if dst != 9999:
+                    distances[int(row[0])] = (dst, int(row[0]))
 
-        switch_dict[switch] = distances
-
+        base_dict[switch] = distances[:] #on-hop costs
+        switch_dict[switch] = distances #working table
+    
     #loop back through the switches to find the minimum distances and next hop
     path_dict = {}
     for i in range(num_switches):
-        dsts = switch_dict[i]
+        dsts = switch_dict[i][:]
 
         known_neighbors = []
         for n in range(num_switches):
@@ -132,42 +139,31 @@ def find_neighbors(route_table):
             while known:
                 min_dist = sorted(dsts)[1 + aa]
 
-                #if the min distance is 9999, it's unreachable
                 if min_dist[0] == 9999:
-                    aa = num_switches  # force break condition
+                    aa = num_switches
                     break
 
-                if known_neighbors[min_dist[1]]:
+                if known_neighbors[dsts.index(min_dist)]:
                     aa += 1
                     if aa > num_switches-2:
                         break
                 else:
                     known = False
-            if aa > num_switches-2:
-                break
 
-            curr_node = min_dist[1]
-            curr_node_dsts = switch_dict[curr_node]
+                curr_node = dsts.index(min_dist)
+
+            curr_node_dsts = base_dict[curr_node]
 
             hops[curr_node].append(curr_node)
 
             known_neighbors[curr_node] = True
             for j in range(num_switches):
-                sum_dst_curr_node = 0
-                for hop in hops[curr_node]:
-                    
-                    #don't add invalid distances
-                    if dsts[hop][0] != 9999:
-                        sum_dst_curr_node += dsts[hop][0]
-                    else:
-                        sum_dst_curr_node = 9999
-                        break
-
-                #don't try to use invalid distances
-                if sum_dst_curr_node == 9999 or curr_node_dsts[j][0] == 9999:
+                
+                if dsts[curr_node][0] == 9999 or curr_node_dsts[j][0] == 9999:
                     continue
 
-                new_dist = sum_dst_curr_node + curr_node_dsts[j][0]
+                new_dist = dsts[curr_node][0] + curr_node_dsts[j][0]
+
                 if new_dist < dsts[j][0]:
                     hops[j] = hops[curr_node] + [j]
 
@@ -183,6 +179,7 @@ def find_neighbors(route_table):
             if n != i and dsts[n][0] == 9999:
                 dsts[n] = (9999, -1)
 
+        switch_dict[i] = dsts
         path_dict[i] = hops
     return switch_dict, path_dict
 
