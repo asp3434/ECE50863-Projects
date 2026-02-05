@@ -90,32 +90,35 @@ def convert_config(config):
 def find_neighbors(route_table):
 
     switch_dict = {}
-    #first pass
+    base_dict = {}
+    
+    #first pass, this reads in all the values from the route_table and send them to a dictionary
     num_switches = int(route_table[0][0])
     for switch in range(num_switches):
         distances = [(9999, -1) for i in range(int(route_table[0][0]))]
 
+        #distance between x and yourself is always 0
         distances[switch] = (0, switch)
-        for row in route_table:
-            if len(row) == 1:
-                continue
-            elif int(row[0]) == switch:
-                w = int(row[2])
+        for row in route_table[1:]:
+            
+            #adding distances for the switch
+            if int(row[0]) == switch:
+                dst = int(row[2])
                 #9999 is invalid distance
-                if w != 9999:
-                    distances[int(row[1])] = (w, int(row[1]))
+                if dst != 9999:
+                    distances[int(row[1])] = (dst, int(row[1]))
             elif int(row[1]) == switch:
-                w = int(row[2])
+                dst = int(row[2])
                 #9999 is invalid distance
-                if w != 9999:
-                    distances[int(row[0])] = (w, int(row[0]))
-
-        switch_dict[switch] = distances
-
+                if dst != 9999:
+                    distances[int(row[0])] = (dst, int(row[0]))
+        
+        base_dict[switch] = distances[:] #on-hop costs
+        switch_dict[switch] = distances #working table
     #loop back through the switches to find the minimum distances and next hop
     path_dict = {}
     for i in range(num_switches):
-        dsts = switch_dict[i]
+        dsts = switch_dict[i][:]
 
         known_neighbors = []
         for n in range(num_switches):
@@ -137,37 +140,25 @@ def find_neighbors(route_table):
                     aa = num_switches  # force break condition
                     break
 
-                if known_neighbors[min_dist[1]]:
+                if known_neighbors[dsts.index(min_dist)]:
                     aa += 1
                     if aa > num_switches-2:
                         break
                 else:
                     known = False
-            if aa > num_switches-2:
-                break
 
-            curr_node = min_dist[1]
-            curr_node_dsts = switch_dict[curr_node]
+            curr_node = dsts.index(min_dist)
+            curr_node_dsts = base_dict[curr_node]
 
             hops[curr_node].append(curr_node)
 
             known_neighbors[curr_node] = True
             for j in range(num_switches):
-                sum_dst_curr_node = 0
-                for hop in hops[curr_node]:
-                    
-                    #don't add invalid distances
-                    if dsts[hop][0] != 9999:
-                        sum_dst_curr_node += dsts[hop][0]
-                    else:
-                        sum_dst_curr_node = 9999
-                        break
-
-                #don't try to use invalid distances
-                if sum_dst_curr_node == 9999 or curr_node_dsts[j][0] == 9999:
+                
+                if dsts[curr_node][0] == 9999 or curr_node_dsts[j][0] == 9999:
                     continue
 
-                new_dist = sum_dst_curr_node + curr_node_dsts[j][0]
+                new_dist = dsts[curr_node][0] + curr_node_dsts[j][0]
                 if new_dist < dsts[j][0]:
                     hops[j] = hops[curr_node] + [j]
 
@@ -183,6 +174,7 @@ def find_neighbors(route_table):
             if n != i and dsts[n][0] == 9999:
                 dsts[n] = (9999, -1)
 
+        switch_dict[i] = dsts
         path_dict[i] = hops
     return switch_dict, path_dict
 
@@ -204,12 +196,14 @@ def work(sock, route_table_raw, num_switches, switches):
         if topology_change == True:
             topology_change = False
             switch_id = int(topology_msg[0][0])
+            changed = False
             for row in new_route_table:
                 for neighbor in topology_msg[1:]:
                     if len(row) != 1:
                         neighbor_id = int(neighbor[0])
                         if ((int(row[0]) == switch_id and int(row[1]) == int(neighbor_id)) or (int(row[1]) == switch_id and int(row[0]) == int(neighbor_id))) and (neighbor[1] == False):
                             row[2] = 9999
+                            changed = True
                             topology_update_link_dead(switch_id, neighbor_id)
                             new_switch_dict, new_path_dict = find_neighbors(new_route_table)
                                 
@@ -260,6 +254,7 @@ def work(sock, route_table_raw, num_switches, switches):
                             if switch_status == False:
                                 i = new_route_table.index(row)
                                 row[2] = route_table_raw[i][2]
+                                changed = True
 
                                 new_switch_dict, new_path_dict = find_neighbors(new_route_table)
                                 
@@ -275,7 +270,12 @@ def work(sock, route_table_raw, num_switches, switches):
                                         switch_route_table.append(row)
                                     #print(switch_route_table)
                                     sock.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
-                        
+            if not changed:
+                continue
+            
+            new_switch_dict, _ = find_neighbors(new_route_table)
+            routing_table_update(num_switches, new_switch_dict)           
+            
             #sending routing information to each switch
             for switch in range(num_switches):
                 switch_route_table= []
@@ -315,13 +315,21 @@ def main():
     switches = []
 
     #waiting for check-in from each switch
+    dead_links = []
     while n < m:
         data, addr = s.recvfrom(4096)
-        msg = data.decode('utf-8')
+        msg = json.loads(data.decode('utf-8'))
 
-        switches.append((msg, addr[1]))
-
-        register_request_received(msg)
+        #normal logging of switch check-in
+        if type(msg) == int:
+            switches.append((msg, addr[1]))
+            register_request_received(msg)
+        
+        #logging in case there is a dead link on startup
+        else:
+            switches.append((msg[0], addr[1]))
+            dead_links.append((msg[0], msg[1]))
+            register_request_received(msg[0])
         n += 1
 
     switches.sort(key=lambda x: int(x[0]))
@@ -333,12 +341,21 @@ def main():
         s.sendto(str(int(switch[0])+10).encode('utf-8'), ('127.0.0.1', switch[1]))
         register_response_sent(int(switch[0]))
 
+    #reconfigure the routing table to account for dead links
+    for row in route_table_raw:
+        if route_table_raw.index(row) == 0:
+            continue
+        for dead in dead_links:
+            if (row[0] == dead[0] and row[1] == dead[1]) or (row[1] == dead[0] and row[0] == dead[1]):
+                row[2] = 9999
+    
+    #log the dead links
+    for row in dead_links:            
+        topology_update_link_dead(row[0], row[1])
+    
     # calculate routes and log routes
     switch_dict, path_dict = find_neighbors(route_table_raw)
     routing_table_update(num_switches, switch_dict)
-
-    # print(f"Switch Dictionary: {switch_dict}")
-    # print(f"Path Dictionary {path_dict}")
 
     #sending routing information to each switch
     for switch in range(num_switches):

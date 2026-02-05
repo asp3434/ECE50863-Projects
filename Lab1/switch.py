@@ -159,9 +159,16 @@ def main():
     #convert arguments provided from the system
     controller_port = int(sys.argv[3])
     controller_name = sys.argv[2]
+    
+    #establish where the dead link is
+    if num_args == 6:
+        dead_neighbor = int(sys.argv[5])
+        msg = json.dumps([my_id, dead_neighbor])
+    else:
+        msg = json.dumps(my_id)
 
     #send message to controller to initialize comms
-    s.sendto(str(my_id).encode('utf-8'), (controller_name, controller_port))
+    s.sendto(msg.encode('utf-8'), (controller_name, controller_port))
     register_request_sent()
 
     #wait for a response
@@ -189,7 +196,6 @@ def main():
 
     ######## Simon says: don't talk to your neighbor ########
     if num_args == 6:
-        dead_neighbor = int(sys.argv[5])
         failed_status = True
         for neighbor in neighbors:
             if neighbor[0] == dead_neighbor:
