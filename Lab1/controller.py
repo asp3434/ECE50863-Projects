@@ -204,28 +204,40 @@ def work(sock, route_table_raw, num_switches, switches):
         if topology_change == True:
             topology_change = False
             switch_id = int(topology_msg[0][0])
+            changed = False
             for row in new_route_table:
                 for neighbor in topology_msg[1:]:
+                    
+                    #skip the first entry
                     if len(row) != 1:
                         neighbor_id = int(neighbor[0])
+                        
+                        #enter the dead links and dead switches realm
                         if ((int(row[0]) == switch_id and int(row[1]) == int(neighbor_id)) or (int(row[1]) == switch_id and int(row[0]) == int(neighbor_id))) and (neighbor[1] == False):
+                            
+                            #dead links
                             row[2] = 9999
+                            changed = True
                             topology_update_link_dead(switch_id, neighbor_id)
                             new_switch_dict, new_path_dict = find_neighbors(new_route_table)
                                 
+                            #dead switches
                             track_dead_links = []
                             for dead_link in new_switch_dict[neighbor_id]:
                                 if (dead_link[0] == 9999):
                                     track_dead_links.append(False)
                                 elif dead_link[0] !=0:
                                     track_dead_links.append(True)
+                            
+                            #dead switches (continued)
                             if True not in track_dead_links:
                                 if alive[neighbor_id]:
                                     topology_update_switch_dead(neighbor_id)
                                     alive[neighbor_id] = False
+                                
                                 routing_table_update(num_switches, new_switch_dict)
                                 
-                                 #sending routing information to each switch
+                                #DEAD: sending routing information to each switch
                                 for switch in range(num_switches):
                                     switch_route_table= []
                                     for destination in range(num_switches):
@@ -244,6 +256,7 @@ def work(sock, route_table_raw, num_switches, switches):
                                     #print(switch_route_table)
                                     sock.sendto(json.dumps(switch_route_table).encode('utf-8'), ('127.0.0.1', switches[switch][1]))
                             
+                        #Something changed, but it's coming alive
                         elif ((row[0] == switch_id and row[1] == int(neighbor_id)) or (row[1] == switch_id and row[0] == int(neighbor_id))) and (neighbor[1] == True) and (row[2] == 9999):
                             new_switch_dict, new_path_dict = find_neighbors(new_route_table)
                                 
@@ -260,6 +273,7 @@ def work(sock, route_table_raw, num_switches, switches):
                             if switch_status == False:
                                 i = new_route_table.index(row)
                                 row[2] = route_table_raw[i][2]
+                                changed = True
 
                                 new_switch_dict, new_path_dict = find_neighbors(new_route_table)
                                 
