@@ -1,4 +1,5 @@
 from typing import List
+import matplotlib.pyplot as plt
 
 # Adapted from code by Zach Peats
 
@@ -61,27 +62,160 @@ class ClientMessage:
 
 # Your helper functions, variables, classes here. You may also write initialization routines to be called
 # when this script is first imported and anything else you wish.
+rebuffer_array = []
+buffer_size_array = []
+bitrate_array = []
+throughput_array = []
+qoe_array = []
+time_array = []
 
+res_high: int
+res_low: int
+startup_over_flag: int
+
+def bba_2(message: ClientMessage):
+    global time_array
+    global res_high
+    global res_low
+    global startup_over_flag
+    
+    # number of chunks in the buffer    
+    chunk_buffer_fill = message.buffer_seconds_until_empty / message.buffer_seconds_per_chunk
+    
+    # set reservoir high and low values and begin startup phase
+    if len(time_array) <= 1:
+        res_high = int(round(0.2 * len(message.upcoming_quality_bitrates)))
+        res_low = int(round(0.05 * len(message.upcoming_quality_bitrates)))
+        startup_over_flag = 0
+    
+    '''
+    # startup phase
+    if throughput_safet_check(message) and startup_over_flag == 0:
+    	if chunk_buffer_fill == res_high:
+			startup_over_flag = 1
+			break
+
+		
+    '''
+    
+    # BBA-0
+    #lowest bitrate for low buffer
+    if chunk_buffer_fill < res_low:
+        return 0
+    
+    #highest bitrate for filled buffer
+    elif chunk_buffer_fill >= res_high:
+        
+        '''
+        throughput safety check
+        '''
+        
+        return message.quality_levels - 1
+    
+    else:
+        #linear function for the cushion zone
+        ramp_chunks = res_high - res_low
+        bit_rate = int(round((message.quality_levels - 1) * (chunk_buffer_fill - res_low) / ramp_chunks))
+        
+        '''
+        throughput safety check
+        '''
+        return bit_rate
+
+def throughput_safety_check(message: ClientMessage):
+    
+    if
+		return 1
+    else:
+        return 0
+
+def update_arrays(message: ClientMessage):
+    global rebuffer_array
+    global buffer_size_array
+    global bitrate_array
+    global throughput_array
+    global time_array
+    
+    # update time array
+    time_array.append(message.total_seconds_elapsed)
+    
+    # number of chunks in the buffer    
+    chunk_buffer_fill = message.buffer_seconds_until_empty / message.buffer_seconds_per_chunk
+    
+    # update rebuffer event array, kB
+    if chunk_buffer_fill == 0 or message.buffer_seconds_until_empty == 0:
+        rebuffer_array.append(1)
+    else:
+        rebuffer_array.append(0)
+        
+    # update buffer size array
+    buffer_size_array.append(chunk_buffer_fill)
+    
+    # update bitrate array, kB
+    quality = bba_2(message)
+    bitrate_array.append(message.quality_bitrates[quality])
+    
+    # update throughput array
+    throughput_array.append(message.previous_throughput)
+  
+# def update_qoe_array():
+
+def plot_buffer_size():
+    plt.figure()
+    
+    # plot the buffer
+    plt.plot(time_array, buffer_size_array, label="Buffer")
+    
+    #plot rebuffer events
+    for i in range(len(rebuffer_array)):
+        if rebuffer_array[i]:
+            plt.axvline(x= time_array[i], color="red")
+            
+    plt.xlabel("Time (s)")
+    plt.ylabel("Buffer Size (kB)")
+    plt.title("Buffer Size vs Time")
+    
+    plt.savefig("buffer_size.png")
+    plt.close()
+    
+def plot_bitrate():
+    plt.figure()
+    
+    # plot the bitrate
+    plt.plot(time_array, bitrate_array, label="Bitrate")
+        
+    # labels and title
+    plt.xlabel("Time (s)")
+    plt.ylabel("Bitrate / Quality (kB)")
+    plt.title("Bitrate / Quality vs Time")
+    
+    plt.savefig("bitrate_quality.png")
+    plt.close()
+    
+def plot_throughput():
+    plt.figure()
+    
+    # plot the throughput
+    plt.plot(time_array, throughput_array, label="Throughput")
+        
+    # labels and title
+    plt.xlabel("Time (s)")
+    plt.ylabel("Throughput (kB/s)")
+    plt.title("Throughput vs Time")
+    
+    plt.savefig("throughput.png")
+    plt.close()
+
+# def plot_qoe():
 
 def student_entrypoint(client_message: ClientMessage):
-	"""
-	Your mission, if you choose to accept it, is to build an algorithm for chunk bitrate selection that provides
-	the best possible experience for users streaming from your service.
-
-	Construct an algorithm below that selects a quality for a new chunk given the parameters in ClientMessage. Feel
-	free to create any helper function, variables, or classes as you wish.
-
-	Simulation does ~NOT~ run in real time. The code you write can be as slow and complicated as you wish without
-	penalizing your results. Focus on picking good qualities!
-
-	Also remember the config files are built for one particular client. You can (and should!) adjust the QoE metrics to
-	see how it impacts the final user score. How do algorithms work with a client that really hates rebuffering? What
-	about when the client doesn't care about variation? For what QoE coefficients does your algorithm work best, and
-	for what coefficients does it fail?
-
-	Args:
-		client_message : ClientMessage holding the parameters for this chunk and current client state.
-
-	:return: float Your quality choice. Must be one in the range [0 ... quality_levels - 1] inclusive.
-	"""
-	return 0  # Let's see what happens if we select the lowest bitrate every time
+    
+    update_arrays(client_message)
+    quality = bba_2(client_message)
+    
+    if len(client_message.upcoming_quality_bitrates) == 0:
+        plot_buffer_size()
+        plot_bitrate()
+        plot_throughput()
+    
+    return quality  # Let's see what happens if we select the lowest bitrate every time
