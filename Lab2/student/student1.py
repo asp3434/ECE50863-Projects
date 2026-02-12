@@ -1,5 +1,5 @@
 from typing import List
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 # Adapted from code by Zach Peats
 
@@ -65,6 +65,7 @@ class ClientMessage:
 rebuffer_array = []
 buffer_size_array = []
 bitrate_array = []
+bitrate_choice_array = []
 throughput_array = []
 qoe_array = []
 time_array = []
@@ -72,62 +73,126 @@ time_array = []
 res_high: int
 res_low: int
 startup_over_flag: int
+q_startup = 0
 
 def bba_2(message: ClientMessage):
     global time_array
     global res_high
     global res_low
     global startup_over_flag
+    global bitrate_choice_array
+    global bitrate_array
+    global q_startup
     
     # number of chunks in the buffer    
     chunk_buffer_fill = message.buffer_seconds_until_empty / message.buffer_seconds_per_chunk
     
     # set reservoir high and low values and begin startup phase
     if len(time_array) <= 1:
-        res_high = int(round(0.2 * len(message.upcoming_quality_bitrates)))
+        res_high = int(round(0.1 * len(message.upcoming_quality_bitrates)))
         res_low = int(round(0.05 * len(message.upcoming_quality_bitrates)))
         startup_over_flag = 0
     
-    '''
     # startup phase
-    if throughput_safet_check(message) and startup_over_flag == 0:
-    	if chunk_buffer_fill == res_high:
-			startup_over_flag = 1
-			break
-
-		
-    '''
-    
-    # BBA-0
-    #lowest bitrate for low buffer
-    if chunk_buffer_fill < res_low:
-        return 0
-    
-    #highest bitrate for filled buffer
-    elif chunk_buffer_fill >= res_high:
+    # break startup conditions
+    if (chunk_buffer_fill >= res_high) or (len(time_array) >= 50):
+        startup_over_flag = 1
         
-        '''
-        throughput safety check
-        '''
-        
-        return message.quality_levels - 1
+    if len(buffer_size_array) >= 2:
+        if (buffer_size_array[-1] < buffer_size_array[-2]):
+            startup_over_flag = 1
     
+    # actual startup phase    
+    if startup_over_flag == 0:
+        if len(time_array) <= 1:
+            #return lowest bitrate until we have a couple in the buffer
+            bitrate_choice_array.append(0)
+            bitrate = message.quality_bitrates[0]
+            bitrate_array.append(bitrate)
+            return 0
+        else:
+            q_startup += 1
+            q_startup = min(q_startup, message.quality_levels - 1)
+            if throughput_safety_check(message, q_startup, res_high, res_low):
+                q_startup = max(0, q_startup - 1)
+            
+            bitrate_choice_array.append(q_startup)
+            bitrate = message.quality_bitrates[q_startup]
+            bitrate_array.append(bitrate)
+            return q_startup
+            
+            ## I accidentally found the max video quality for each step given the previous throughput
+            ## I'm keeping this for notes for later
+            
+            # while proposed_quality < message.quality_levels:
+            #     check = throughput_safety_check(message, proposed_quality)
+            #     if not check:
+            #         proposed_quality += 1
+            #     else:
+            #         quality = max(0, proposed_quality - 1)
+                    
+            #         bitrate_choice_array.append(quality)
+            #         bitrate = message.quality_bitrates[quality]
+            #         bitrate_array.append(bitrate)
+                    
+            #         return quality
+            
+            # bitrate_choice_array.append(proposed_quality -1)
+            # bitrate = message.quality_bitrates[proposed_quality-1]
+            # bitrate_array.append(bitrate)
+            # return proposed_quality-1
+                    
     else:
-        #linear function for the cushion zone
-        ramp_chunks = res_high - res_low
-        bit_rate = int(round((message.quality_levels - 1) * (chunk_buffer_fill - res_low) / ramp_chunks))
+        #lowest bitrate for low buffer
+        if chunk_buffer_fill < res_low:
+            
+            #append choice to an array
+            bitrate_choice_array.append(0)
+            
+            #return lowest bitrate until we fill the reservoir
+            bitrate = message.quality_bitrates[0]
+            bitrate_array.append(bitrate)
+            return 0
         
-        '''
-        throughput safety check
-        '''
-        return bit_rate
+        #highest bitrate for filled buffer
+        elif chunk_buffer_fill >= res_high:
+            
+            #propose the highest bitrate if the buffer is full
+            proposed_quality = message.quality_levels - 1
 
-def throughput_safety_check(message: ClientMessage):
-    
-    if
-		return 1
+            bitrate_choice_array.append(proposed_quality)
+            bitrate = message.quality_bitrates[proposed_quality]
+            bitrate_array.append(bitrate)
+                
+            return proposed_quality
+        
+        else:
+            #linear function for the cushion zone
+            ramp_chunks = res_high - res_low
+            proposed_quality = int(round((message.quality_levels - 1) * (chunk_buffer_fill - res_low) / ramp_chunks))
+            
+            bitrate_choice_array.append(proposed_quality)
+            bitrate = message.quality_bitrates[proposed_quality]
+            bitrate_array.append(bitrate)
+
+            return proposed_quality
+
+def throughput_safety_check(message: ClientMessage, proposed_quality_choice, reservoir_high, reservoir_low):
+    if message.previous_throughput == 0:
+        return 1
     else:
-        return 0
+        delta_buffer = message.buffer_seconds_per_chunk - (message.quality_bitrates[proposed_quality_choice] / message.previous_throughput)
+        
+        # calculate buffer factor
+        ramp_chunks = reservoir_high - reservoir_low
+        chunk_buffer_fill = message.buffer_seconds_until_empty / message.buffer_seconds_per_chunk
+        factor = (chunk_buffer_fill - reservoir_low) / ramp_chunks * 0.875
+        
+        if delta_buffer <= max(0.5, factor) * message.buffer_seconds_per_chunk:
+            # a 1 means that you hit the check and you shouldn't use the proposed quality because throughput was too low
+            return 1  
+        else:
+            return 0
 
 def update_arrays(message: ClientMessage):
     global rebuffer_array
@@ -151,60 +216,56 @@ def update_arrays(message: ClientMessage):
     # update buffer size array
     buffer_size_array.append(chunk_buffer_fill)
     
-    # update bitrate array, kB
-    quality = bba_2(message)
-    bitrate_array.append(message.quality_bitrates[quality])
-    
     # update throughput array
     throughput_array.append(message.previous_throughput)
   
 # def update_qoe_array():
 
-def plot_buffer_size():
-    plt.figure()
+# def plot_buffer_size():
+#     plt.figure()
     
-    # plot the buffer
-    plt.plot(time_array, buffer_size_array, label="Buffer")
+#     # plot the buffer
+#     plt.plot(time_array, buffer_size_array, label="Buffer")
     
-    #plot rebuffer events
-    for i in range(len(rebuffer_array)):
-        if rebuffer_array[i]:
-            plt.axvline(x= time_array[i], color="red")
+#     #plot rebuffer events
+#     for i in range(len(rebuffer_array)):
+#         if rebuffer_array[i]:
+#             plt.axvline(x= time_array[i], color="red")
             
-    plt.xlabel("Time (s)")
-    plt.ylabel("Buffer Size (kB)")
-    plt.title("Buffer Size vs Time")
+#     plt.xlabel("Time (s)")
+#     plt.ylabel("Buffer Size (kB)")
+#     plt.title("Buffer Size vs Time")
     
-    plt.savefig("buffer_size.png")
-    plt.close()
+#     plt.savefig("BBA2_buffer_size.png")
+#     plt.close()
     
-def plot_bitrate():
-    plt.figure()
+# def plot_bitrate():
+#     plt.figure()
     
-    # plot the bitrate
-    plt.plot(time_array, bitrate_array, label="Bitrate")
+#     # plot the bitrate
+#     plt.plot(time_array, bitrate_array, label="Bitrate")
         
-    # labels and title
-    plt.xlabel("Time (s)")
-    plt.ylabel("Bitrate / Quality (kB)")
-    plt.title("Bitrate / Quality vs Time")
+#     # labels and title
+#     plt.xlabel("Time (s)")
+#     plt.ylabel("Bitrate / Quality (kB)")
+#     plt.title("Bitrate / Quality vs Time")
     
-    plt.savefig("bitrate_quality.png")
-    plt.close()
+#     plt.savefig("BBA2_bitrate_quality.png")
+#     plt.close()
     
-def plot_throughput():
-    plt.figure()
+# def plot_throughput():
+#     plt.figure()
     
-    # plot the throughput
-    plt.plot(time_array, throughput_array, label="Throughput")
+#     # plot the throughput
+#     plt.plot(time_array, throughput_array, label="Throughput")
         
-    # labels and title
-    plt.xlabel("Time (s)")
-    plt.ylabel("Throughput (kB/s)")
-    plt.title("Throughput vs Time")
+#     # labels and title
+#     plt.xlabel("Time (s)")
+#     plt.ylabel("Throughput (kB/s)")
+#     plt.title("Throughput vs Time")
     
-    plt.savefig("throughput.png")
-    plt.close()
+#     plt.savefig("BBA2_throughput.png")
+#     plt.close()
 
 # def plot_qoe():
 
@@ -213,9 +274,9 @@ def student_entrypoint(client_message: ClientMessage):
     update_arrays(client_message)
     quality = bba_2(client_message)
     
-    if len(client_message.upcoming_quality_bitrates) == 0:
-        plot_buffer_size()
-        plot_bitrate()
-        plot_throughput()
+    # if len(client_message.upcoming_quality_bitrates) == 0:
+    #     plot_buffer_size()
+    #     plot_bitrate()
+    #     plot_throughput()
     
     return quality  # Let's see what happens if we select the lowest bitrate every time
