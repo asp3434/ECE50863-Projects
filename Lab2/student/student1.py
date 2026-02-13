@@ -1,4 +1,5 @@
 from typing import List
+import statistics
 # import matplotlib.pyplot as plt
 
 # Adapted from code by Zach Peats
@@ -70,6 +71,9 @@ throughput_array = []
 qoe_array = []
 time_array = []
 
+base_res_high: float
+base_res_low: float
+window: int
 res_high: int
 res_low: int
 startup_over_flag: int
@@ -77,6 +81,9 @@ q_startup = 0
 
 def bba_2(message: ClientMessage):
     global time_array
+    global base_res_high
+    global base_res_low
+    global window
     global res_high
     global res_low
     global startup_over_flag
@@ -89,9 +96,34 @@ def bba_2(message: ClientMessage):
     
     # set reservoir high and low values and begin startup phase
     if len(time_array) <= 1:
-        res_high = int(round(0.1 * len(message.upcoming_quality_bitrates)))
-        res_low = int(round(0.05 * len(message.upcoming_quality_bitrates)))
+        window = int(round(0.03 * len(message.upcoming_quality_bitrates)))
+        base_res_high = int(round(0.1 * len(message.upcoming_quality_bitrates)))
+        base_res_low = int(round(0.08 * len(message.upcoming_quality_bitrates)))
+        
         startup_over_flag = 0
+    
+    # dynamic reservoir
+    avg_chunk = 0
+    max_chunk = 0
+    if len(message.upcoming_quality_bitrates[:window]) > 0:
+        for row in message.upcoming_quality_bitrates[:window]:
+            avg_chunk += statistics.mean(row)
+            proposed_max_chunk = max(row)
+            if proposed_max_chunk > max_chunk:
+                max_chunk = proposed_max_chunk
+    
+        avg_chunk = avg_chunk / len(message.upcoming_quality_bitrates[:window])
+        dynamic_ratio = (max_chunk / avg_chunk) - 1
+        
+        if dynamic_ratio > 2.5:
+            res_high = int(round(base_res_high * dynamic_ratio))
+            res_low = int(round(base_res_low * dynamic_ratio))
+        else:
+            res_high = base_res_high
+            res_low = base_res_low
+    else:
+        res_high = base_res_high
+        res_low = base_res_low
     
     # startup phase
     # break startup conditions
@@ -166,10 +198,27 @@ def bba_2(message: ClientMessage):
                 
             return proposed_quality
         
+        elif (bitrate_choice_array[-1] != bitrate_choice_array[-2]):
+            bitrate_choice_array.append(bitrate_choice_array[-1])
+            bitrate = message.quality_bitrates[bitrate_choice_array[-1]]
+            bitrate_array.append(bitrate)
+            
+            return bitrate_choice_array[-1]
+        
         else:
             #linear function for the cushion zone
             ramp_chunks = res_high - res_low
             proposed_quality = int(round((message.quality_levels - 1) * (chunk_buffer_fill - res_low) / ramp_chunks))
+            
+            # mapping to chunks rather than qualities
+            m = (chunk_buffer_fill - res_low) / ramp_chunks
+            proposed_chunk_size = message.quality_bitrates[0] + m*(message.quality_bitrates[-1] - message.quality_bitrates[0])
+            
+            for i, chunk in enumerate(message.quality_bitrates):
+                if chunk <= proposed_chunk_size:
+                    proposed_quality = i
+                else:
+                    break
             
             bitrate_choice_array.append(proposed_quality)
             bitrate = message.quality_bitrates[proposed_quality]
@@ -208,7 +257,7 @@ def update_arrays(message: ClientMessage):
     chunk_buffer_fill = message.buffer_seconds_until_empty / message.buffer_seconds_per_chunk
     
     # update rebuffer event array, kB
-    if chunk_buffer_fill == 0 or message.buffer_seconds_until_empty == 0:
+    if chunk_buffer_fill == 0 or message.buffer_seconds_until_empty < message.buffer_seconds_per_chunk:
         rebuffer_array.append(1)
     else:
         rebuffer_array.append(0)
