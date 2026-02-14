@@ -68,17 +68,22 @@ buffer_size_array = []
 bitrate_array = []
 bitrate_choice_array = []
 throughput_array = []
+predicted_throughput_array = []
 time_array = []
 
 golden_qoe_array = []
 
 window: int
 num_chunks: int
+c_low: float
 
 def MPC(message: ClientMessage):
     global window
     global num_chunks
     global golden_qoe_array
+    global predicted_throughput_array
+    global throughput_array
+    global c_low
     
     # start things off
     if len(time_array) <= 1:
@@ -99,9 +104,19 @@ def MPC(message: ClientMessage):
         
         track = 0
         quality_level = 0
+        
+        #RobustMPC
+        k = min(5, len(throughput_array))
+        error_array = []
+        for i in range(k):
+            e = abs(predicted_throughput_array[-(i+1)] - throughput_array[-(i+1)]) / throughput_array[-(i+1)]
+            error_array.append(e)
+        error = max(error_array)
+        c_low = statistics.harmonic_mean(throughput_array[-k:]) / (1+error)
+        
         for i, quality in enumerate(message.quality_bitrates):
             ## starting point for each quality
-            seconds_to_download = quality / statistics.harmonic_mean(throughput_array[-5:])
+            seconds_to_download = quality / c_low
             buffer_size = message.buffer_seconds_until_empty - seconds_to_download + message.buffer_seconds_per_chunk # measured in seconds
             
             variables = [quality, buffer_size, c, window, n]
@@ -150,6 +165,7 @@ def qoe_loop(message:ClientMessage, v, qoe_arrays, other_arrays):
     global num_chunks
     global throughput_array
     global golden_qoe_array
+    global c_low
     
     ## variables ##
     # quality = v[0]
@@ -185,7 +201,7 @@ def qoe_loop(message:ClientMessage, v, qoe_arrays, other_arrays):
             appended_rebuf = False
             appended_var = False
             
-            seconds_to_download = quality / statistics.harmonic_mean(throughput_array[-5:])
+            seconds_to_download = quality / c_low
             
             # update rebuff time
             if seconds_to_download > buffer_size:
@@ -240,6 +256,7 @@ def update_arrays(message: ClientMessage):
     global buffer_size_array
     global bitrate_array
     global throughput_array
+    global predicted_throughput_array
     global time_array
     
     # update time array
@@ -257,9 +274,10 @@ def update_arrays(message: ClientMessage):
     # update buffer size array
     buffer_size_array.append(chunk_buffer_fill)
     
-    # update throughput array
+    # update throughput array and predicted_throughput
     if len(time_array) > 1:
         throughput_array.append(message.previous_throughput)
+        predicted_throughput_array.append(statistics.harmonic_mean(throughput_array[-5:]))
     
 def update_bitrate_array(message: ClientMessage, quality_level):
     global bitrate_choice_array
