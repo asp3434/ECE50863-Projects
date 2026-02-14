@@ -1,5 +1,5 @@
 from typing import List
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import statistics
 
 # Adapted from code by Zach Peats
@@ -68,25 +68,172 @@ buffer_size_array = []
 bitrate_array = []
 bitrate_choice_array = []
 throughput_array = []
-qoe_array = []
 time_array = []
 
+golden_qoe_array = []
+
 window: int
+num_chunks: int
 
 def MPC(message: ClientMessage):
-    global bitrate_choice_array
-    global bitrate_array
+    global window
+    global num_chunks
+    global golden_qoe_array
     
     # start things off
-    if message.previous_throughput == 0:
+    if len(time_array) <= 1:
+        window = 5
+        num_chunks = len(message.upcoming_quality_bitrates) + 1
         
-        bitrate_choice_array.append(0)
-        bitrate = message.quality_bitrates[0]
-        bitrate_array.append(bitrate)
-        return message.quality_bitrates[0]
+        update_bitrate_array(message, 0)
+        return 0
     
     else:
+        n = 0
+        qoe = 0.00001
         
+        c_qual = message.quality_coefficient
+        c_var = message.variation_coefficient
+        c_rebuff = message.rebuffering_coefficient
+        c = [c_qual, c_var, c_rebuff]
+        
+        track = 0
+        quality_level = 0
+        for i, quality in enumerate(message.quality_bitrates):
+            ## starting point for each quality
+            seconds_to_download = quality / statistics.harmonic_mean(throughput_array[-5:])
+            buffer_size = message.buffer_seconds_until_empty - seconds_to_download + message.buffer_seconds_per_chunk # measured in seconds
+            
+            variables = [quality, buffer_size, c, window, n]
+            
+            ## qoe arrays ##
+            loop_quality_array = [quality]
+            loop_qual_change_array = []
+            loop_rebuffer_time_array = [0]
+            
+            qoe_arrays = [loop_quality_array, loop_qual_change_array, loop_rebuffer_time_array]
+            
+            ## other arrays ##
+            loop_buffer_array = [buffer_size]
+            loop_qual_choice_array = [i]
+            
+            ## the golden qoe array
+            golden_qoe_array = []
+            
+            other_arrays = [loop_buffer_array, loop_qual_choice_array]
+            
+            ## enter the death loop, but only enter if we're not going to immediately rebuffer
+            if seconds_to_download < message.buffer_seconds_until_empty:
+                if i != bitrate_choice_array[-1]:
+                    loop_qual_change_array.append(1)
+                
+                qoe_loop(message, variables, qoe_arrays, other_arrays)
+                
+                new_qoe = max(golden_qoe_array)
+                if type(new_qoe) == list:
+                    new_qoe = max(new_qoe)
+                
+                if new_qoe > qoe:
+                    qoe = new_qoe
+                    quality_level = i
+            # if all options lead to rebuffering, just choose the lowest quality
+            else:
+                track += 1
+                if track == message.quality_levels:
+                    update_bitrate_array(message, 0)
+                    return 0
+        
+        update_bitrate_array(message, quality_level)
+        return quality_level
+        
+def qoe_loop(message:ClientMessage, v, qoe_arrays, other_arrays):
+    global num_chunks
+    global throughput_array
+    global golden_qoe_array
+    
+    ## variables ##
+    # quality = v[0]
+    buffer_size = v[1]
+    c = v[2]
+    window = v[3]
+    n = v[4]
+    
+    ## qoe arrays ##
+    quality_array = qoe_arrays[0] # measured in number of chunks
+    qual_change_array = qoe_arrays[1]
+    rebuffer_time_array = qoe_arrays[2]
+    
+    ## other arrays ##
+    buffer_array = other_arrays[0]
+    qual_choice_array = other_arrays[1]
+    
+    if (n >= window) or (n >= len(message.upcoming_quality_bitrates)):
+        qual = sum(quality_array)
+        variability = sum(qual_change_array)
+        rebuff_time = sum(rebuffer_time_array)
+        
+        qoe = (c[0] * qual - c[1] * variability - c[2] * rebuff_time)  / window
+        
+        qoe_arrays = [[] for row in qoe_arrays]
+        other_arrays = [[] for row in other_arrays]
+        
+        golden_qoe_array.append(qoe)
+    else:
+                
+        row = message.upcoming_quality_bitrates[n]
+        for j, quality in enumerate(row):
+            appended_rebuf = False
+            appended_var = False
+            
+            seconds_to_download = quality / statistics.harmonic_mean(throughput_array[-5:])
+            
+            # update rebuff time
+            if seconds_to_download > buffer_size:
+                delta_rebuff = seconds_to_download - buffer_size
+                rebuffer_time_array.append(delta_rebuff)
+                appended_rebuf = True
+            
+            next_buffer_size = buffer_size - seconds_to_download + message.buffer_seconds_per_chunk # measured in seconds
+            if next_buffer_size < 0:
+                next_buffer_size = 0
+            
+            ## update variables
+            v_next = v.copy()
+            v_next[0] = quality
+            v_next[1] = next_buffer_size
+            v_next[4] = n +1
+            
+            ## update qoe arrays, except rebuff time
+            quality_array.append(j) # update total quality
+
+            if len(qual_choice_array) > 1:
+                if j != qual_choice_array[-1]:
+                    qual_change_array.append(1) # update quality change events
+                    appended_var = True
+            else:
+                if j != qual_choice_array[0]:
+                    qual_change_array.append(1) # update quality change events
+                    appended_var = True
+            
+            ## update other arrays
+            buffer_array.append(next_buffer_size)
+            qual_choice_array.append(j)
+                            
+            qoe_arrays = [quality_array, qual_change_array, rebuffer_time_array]
+            other_arrays = [buffer_array, qual_choice_array]
+            
+            qoe_loop(message, v_next, qoe_arrays, other_arrays)
+            
+            #cleanup the arrays after recursion
+            qual_choice_array.pop()
+            buffer_array.pop()
+            quality_array.pop()
+
+            if appended_var:
+                qual_change_array.pop()
+
+            if appended_rebuf:
+                rebuffer_time_array.pop()
 
 def update_arrays(message: ClientMessage):
     global rebuffer_array
@@ -111,66 +258,73 @@ def update_arrays(message: ClientMessage):
     buffer_size_array.append(chunk_buffer_fill)
     
     # update throughput array
-    throughput_array.append(message.previous_throughput)
+    if len(time_array) > 1:
+        throughput_array.append(message.previous_throughput)
     
-# def update_qoe_array():
+def update_bitrate_array(message: ClientMessage, quality_level):
+    global bitrate_choice_array
+    global bitrate_array
+    
+    bitrate_choice_array.append(quality_level)
+    bitrate = message.quality_bitrates[quality_level]
+    bitrate_array.append(bitrate)
 
-def plot_buffer_size():
-    plt.figure()
+# def plot_buffer_size():
+#     plt.figure()
     
-    # plot the buffer
-    plt.plot(time_array, buffer_size_array, label="Buffer")
+#     # plot the buffer
+#     plt.plot(time_array, buffer_size_array, label="Buffer")
     
-    #plot rebuffer events
-    for i in range(len(rebuffer_array)):
-        if rebuffer_array[i]:
-            plt.axvline(x= time_array[i], color="red")
+#     #plot rebuffer events
+#     for i in range(len(rebuffer_array)):
+#         if rebuffer_array[i]:
+#             plt.axvline(x= time_array[i], color="red")
             
-    plt.xlabel("Time (s)")
-    plt.ylabel("Buffer Size (kB)")
-    plt.title("Buffer Size vs Time")
+#     plt.xlabel("Time (s)")
+#     plt.ylabel("Buffer Size (kB)")
+#     plt.title("Buffer Size vs Time")
     
-    plt.savefig("MPC_buffer_size.png")
-    plt.close()
+#     plt.savefig("MPC_buffer_size.png")
+#     plt.close()
     
-def plot_bitrate():
-    plt.figure()
+# def plot_bitrate():
+#     plt.figure()
     
-    # plot the bitrate
-    plt.plot(time_array, bitrate_array, label="Bitrate")
+#     # plot the bitrate
+#     plt.plot(time_array, bitrate_array, label="Bitrate")
         
-    # labels and title
-    plt.xlabel("Time (s)")
-    plt.ylabel("Bitrate / Quality (kB)")
-    plt.title("Bitrate / Quality vs Time")
+#     # labels and title
+#     plt.xlabel("Time (s)")
+#     plt.ylabel("Bitrate / Quality (kB)")
+#     plt.title("Bitrate / Quality vs Time")
     
-    plt.savefig("MPC_bitrate_quality.png")
-    plt.close()
+#     plt.savefig("MPC_bitrate_quality.png")
+#     plt.close()
     
-def plot_throughput():
-    plt.figure()
+# def plot_throughput():
+#     plt.figure()
     
-    # plot the throughput
-    plt.plot(time_array, throughput_array, label="Throughput")
+#     # plot the throughput
+#     plt.plot(time_array, throughput_array, label="Throughput")
         
-    # labels and title
-    plt.xlabel("Time (s)")
-    plt.ylabel("Throughput (kB/s)")
-    plt.title("Throughput vs Time")
+#     # labels and title
+#     plt.xlabel("Time (s)")
+#     plt.ylabel("Throughput (kB/s)")
+#     plt.title("Throughput vs Time")
     
-    plt.savefig("MPC_throughput.png")
-    plt.close()
-
-# def plot_qoe():
+#     plt.savefig("MPC_throughput.png")
+#     plt.close()
 
 def student_entrypoint(client_message: ClientMessage):
+    global throughput_array
     
     update_arrays(client_message)
     quality = MPC(client_message)
     
-    if len(client_message.upcoming_quality_bitrates) == 0:
-        plot_buffer_size()
-        plot_bitrate()
-        plot_throughput()
+    # if len(client_message.upcoming_quality_bitrates) == 0:
+    #     throughput_array.append(client_message.previous_throughput)
+    #     plot_buffer_size()
+    #     plot_bitrate()
+    #     plot_throughput()
         
     return quality  # Let's see what happens if we select the highest bitrate every time
