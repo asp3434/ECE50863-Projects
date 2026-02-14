@@ -115,9 +115,11 @@ def bba_2(message: ClientMessage):
         avg_chunk = avg_chunk / len(message.upcoming_quality_bitrates[:window])
         dynamic_ratio = (max_chunk / avg_chunk) - 1
         
-        if dynamic_ratio > 2.5:
-            res_high = int(round(base_res_high * dynamic_ratio))
+        if dynamic_ratio > 3:
             res_low = int(round(base_res_low * dynamic_ratio))
+            
+        elif dynamic_ratio < 0.7142857142857142:
+            res_high = int(round(base_res_high * dynamic_ratio))
         else:
             res_high = base_res_high
             res_low = base_res_low
