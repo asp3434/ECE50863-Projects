@@ -110,7 +110,7 @@ def customABR(message: ClientMessage):
         current_bitrate = 0
         startup_flag = True
         
-        window = 5
+        window = 6
     
     # set variable to stop the second startup phase
     if len(time_array) > 0.15 * num_chunks:
@@ -137,7 +137,7 @@ def customABR(message: ClientMessage):
      
     ##### primary control loop #####
     # introduce bitrate smoothness by checking if there was a recent change (stickiness to bitrate switching)
-    elif bitrate_choice_array[-1] != bitrate_choice_array[-2]:
+    elif (bitrate_choice_array[-1] != bitrate_choice_array[-2]): # or (bitrate_choice_array[-2] != bitrate_choice_array[-3]):
         proposed_bitrate = bitrate_choice_array[-1]
         update_bitrate_array(message, proposed_bitrate)
         return proposed_bitrate
@@ -353,7 +353,7 @@ def update_arrays(message: ClientMessage):
     # update throughput array and predicted_throughput
     if len(time_array) > 1:
         throughput_array.append(message.previous_throughput)
-        predicted_throughput_array.append(statistics.harmonic_mean(throughput_array[-5:]))
+        predicted_throughput_array.append(statistics.harmonic_mean(throughput_array[-3:]))
     
 def update_bitrate_array(message: ClientMessage, quality_level):
     global bitrate_choice_array
