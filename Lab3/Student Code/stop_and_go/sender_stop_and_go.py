@@ -11,11 +11,9 @@ import configparser
 
 def send_pkt(pkt):
     seq_num = pkt.split(b'\n')[0].decode()
-    print(f'Sending packet {seq_num}...')
-    # print('\n')
-    # print(pkt)
-    # print('\n')
-    print(len(pkt))
+    # print(f'Sending packet {seq_num}...')
+
+    # print(len(pkt))
     send_monitor.send(receiver_id, pkt)
 
 if __name__ == '__main__':
@@ -42,9 +40,13 @@ if __name__ == '__main__':
     # set timeout
     prop_delay = float(cfg.get('network', 'PROP_DELAY'))
     bandwidth = float(cfg.get('network', 'LINK_BANDWIDTH'))
+    if bandwidth < 20000:
+        pad = 5
+    else:
+        pad = 50
     trans_delay = max_packet_size / bandwidth
-    timeout = prop_delay*2 + trans_delay*2
-    send_monitor.socketfd.settimeout(timeout)
+    timeout = prop_delay*2 + trans_delay*pad
+    send_monitor.socketfd.settimeout(0.5)
     
     # Exchange messages
     sent_pkts = []
@@ -70,7 +72,6 @@ if __name__ == '__main__':
                 while True:
                     try:
                         addr, data = send_monitor.recv(max_packet_size)
-                        # print(f'Sender: Got response from id {addr}: {data}')
                         
                         ack_recv = int(data.split()[0])
                         if ack_recv == i:

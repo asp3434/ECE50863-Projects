@@ -22,7 +22,6 @@ def num_packets(file_size, chunk_size):
         return num_packets(file_size, chunk_size)
 
 def send_ack(recvd_pkt):
-    # print(f'Sending ACK...')
     message = recvd_pkt + ' ACK'.encode("utf-8")
     recv_monitor.send(sender_id, message)
 
@@ -55,15 +54,13 @@ if __name__ == '__main__':
     while logged_packets < n_packets+1:
         # receive messages
         addr, data = recv_monitor.recv(max_packet_size)
-        # print(f'Receiver: Got message from id {addr}: {data}')
         
         logged_packets += 1
         seq_str, chunk = data.split(b'\n', 1)
         i = int(seq_str)
-        # print(seq_str, i, len(seq_str))
-        print('\n')
-        print(seq_str, len(seq_str))
-        print(len(chunk))
+        # print('\n')
+        # print(seq_str, len(seq_str))
+        # print(len(chunk))
         
         if i != logged_packets:
             logged_packets -= 1

@@ -26,7 +26,7 @@ def num_packets(file_size, chunk_size):
 
 def send_pkt(pkt):
     seq_num = pkt.split(b'\n')[0].decode()
-    print(f'Sending packet {seq_num}...')
+    # print(f'Sending packet {seq_num}...')
     # print('\n')
     # print(pkt)
     # print('\n')
@@ -34,7 +34,7 @@ def send_pkt(pkt):
     send_monitor.send(receiver_id, pkt)
 
 if __name__ == '__main__':
-    print("Sender starting up!")
+    # print("Sender starting up!")
     config_path = sys.argv[1]
     
     # Initialize sender monitor
@@ -53,20 +53,26 @@ if __name__ == '__main__':
     
     # determine number of chunks to be sent
     chunk_size = max_packet_size -2
-    n_packets = num_packets(file_size, chunk_size)
+    n_packets = num_packets(file_size, chunk_size) +1
     
     # set timeout
     prop_delay = float(cfg.get('network', 'PROP_DELAY'))
     bandwidth = float(cfg.get('network', 'LINK_BANDWIDTH'))
+    if bandwidth < 20000:
+        pad = 5
+    else:
+        pad = 50
     trans_delay = max_packet_size / bandwidth
-    timeout = prop_delay*2 + trans_delay*100
-    # send_monitor.socketfd.settimeout(timeout)
+    timeout = prop_delay*2 + trans_delay*pad
+    print(timeout)
+    send_monitor.socketfd.settimeout(0.5)
     
     #calculate bandwidth delay product
     bdp = bandwidth * prop_delay *2
     #calculate max window
-    window = min(math.floor(bdp / max_packet_size), int(cfg.get('network', 'MAX_PACKETS_QUEUED')))
-    print(f"Your window is: {window}\n")
+    max_window = min(math.floor(bdp / max_packet_size), int(cfg.get('sender', 'window_size')))
+    window = max_window
+    print(f"Your max window is: {max_window}\n")
     
     ######### Exchange messages ############
     sent_pkts = []
@@ -90,34 +96,30 @@ if __name__ == '__main__':
                 
     # send the first packets in the window
     pkt_timestamps = []
-    for j in range(window):
+    for j in range(max_window):
         pkt = f'{j+1}\n'.encode("utf-8") + q_chunks[j]
         sent_pkts.append(pkt)
         pkt_timestamps.append(time.time())
         send_pkt(pkt) # change "chunk" later on to packet when it includes a header
-        
+       
     # enter a loop to send the rest of the packets
     lba = 0 # last byte acknowledged
     ack_pkts = [0] * n_packets # start a list for all ack'ed packets
-    while j < n_packets:
-        addr, data = send_monitor.recv(max_packet_size)
-        ack_recv = int(data.split()[0])
-        
-        # update if the ack was in the window
-        if lba < ack_recv < lba + window and ack_pkts[ack_recv-1] != 1:
-            if ack_recv == lba + 1:
-                # update last byte acknowledged
-                lba += 1
-                # slide the window
-                j+=1
-                pkt = f'{j+1}\n'.encode("utf-8") + q_chunks[j]
-                sent_pkts.append(pkt)
-                send_pkt(pkt)
-                pkt_timestamps.append(time.time())
-                # log ack received
-                ack_pkts[ack_recv-1] = 1
-            else:
-                ack_pkts[ack_recv-1] = 1
+    sent_pkt_count = [0] * n_packets
+    flag = 0
+    while (lba < n_packets - window) or (0 in ack_pkts):
+        # print(lba)
+        ack_recv = -1
+        # window = min(math.floor(window + window/2), max_window)
+        window = max(window, 4)   
+        try:
+            addr, data = send_monitor.recv(max_packet_size)
+            ack_recv = int(data.decode())
+            # print(f"ACK Received: {ack_recv}")
+            
+        except socket.timeout:
+            window = math.floor(window /4)
+            pass
         
         # check for timeouts
         for k in range(lba, min(lba + window, n_packets)):
@@ -125,9 +127,38 @@ if __name__ == '__main__':
                 if time.time() >= pkt_timestamps[k] + timeout:
                     send_pkt(sent_pkts[k])
                     pkt_timestamps[k] = time.time()
+                    sent_pkt_count[k] += 1
+                if sent_pkt_count[k] >= 8:
+                    flag = 1
+        
+        # update if the ack was in the window
+        if lba < ack_recv <= lba + window and ack_pkts[ack_recv-1] != 1:
+            if ack_recv == lba + 1:
+                # update last byte acknowledged
+                ack_pkts[ack_recv-1] += 1 
+                old_lba = lba
+                lba += 1
+                while lba < n_packets and ack_pkts[lba] == 1:
+                    lba += 1
+                slots_opened = lba - old_lba
+                for _ in range(slots_opened):
+                    if j < n_packets - 1:
+                        j += 1
+                        pkt = f'{j+1}\n'.encode("utf-8") + q_chunks[j]
+                        sent_pkts.append(pkt)
+                        pkt_timestamps.append(time.time())
+                        send_pkt(pkt)
+            else:
+                ack_pkts[ack_recv-1] += 1
+        elif ack_pkts[ack_recv-1] >= 4:
+            window = math.floor(window /2)
+        
+        if flag == 1:
+            break
                                  
+    # print(ack_pkts)
     print(f"Total packets sent: {len(sent_pkts)}")
     
     # Exit. Make sure the receiver ends before the sender. send_end will stop the emulator.
-    time.sleep(1)
+    time.sleep(2)
     send_monitor.send_end(receiver_id)

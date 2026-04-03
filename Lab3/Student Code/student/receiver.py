@@ -23,11 +23,11 @@ def num_packets(file_size, chunk_size):
 
 def send_ack(recvd_pkt):
     # print(f'Sending ACK...')
-    message = recvd_pkt + ' ACK'.encode("utf-8")
+    message = recvd_pkt
     recv_monitor.send(sender_id, message)
 
 if __name__ == '__main__':
-    print("Receiver starting up!")
+    # print("Receiver starting up!")
     config_path = sys.argv[1]
     
     # Initialize receiver monitor
@@ -52,6 +52,7 @@ if __name__ == '__main__':
     # exchange messages
     logged_packets = 0
     recvd_pkts = [0] * n_packets
+    flags = [0] * n_packets
     # print(f"{n_packets}\n")
     while logged_packets < n_packets:
         # receive messages
@@ -66,14 +67,19 @@ if __name__ == '__main__':
         # print(len(chunk))
         
         if recvd_pkts[i-1] == 0:
-            print(f"Packet received: {i}")
+            # print(f"Packet received: {i}")
             logged_packets +=1
             recvd_pkts[i-1] = chunk
-            send_ack(f'{i}\n'.encode("utf-8"))
+            flags[i-1] = 1
+        send_ack(f'{i}\n'.encode("utf-8"))
+            
+        # print(logged_packets)
 
     # write the received data to a file
     with open(write_location, 'w') as file:
         file.write(b''.join(recvd_pkts).decode('utf-8')) 
-        
+    
+    # print("Exiting...")
+    send_ack(f'{i}\n'.encode("utf-8"))  
     # Exit. Make sure the receiver ends before the sender. send_end will stop the emulator.
     recv_monitor.recv_end(write_location, sender_id)
