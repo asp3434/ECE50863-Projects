@@ -110,8 +110,8 @@ if __name__ == '__main__':
     while (lba < n_packets - window) or (0 in ack_pkts):
         # print(lba)
         ack_recv = -1
-        # window = min(math.floor(window + window/2), max_window)
-        window = max(window, 4)   
+        window = min(math.floor(window + window/2), max_window)
+        # window = max(window, 4)   
         try:
             addr, data = send_monitor.recv(max_packet_size)
             ack_recv = int(data.decode())
