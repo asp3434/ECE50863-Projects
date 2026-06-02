@@ -25,9 +25,10 @@ Robust Model Predictive Control (RobustMPC): Selects quality level by using the 
 
 customABR: A combination of BBA and RobustMPC that uses a target buffer size rather than buffer "reservoirs." Hysteresis is implemented around the target buffer size to use RobustMPC when within the acceptable range (student3.py).
 
-### Lab 3: TBD
+### Lab 3: TCP Implementation
 #### Description
-TBD
+A simplified version of TCP that captures key attributes of the protocol and is exercised by transferring a text file through a network emulator.
 
-#### Details
-TBD
+### Lab 4: DNS Server
+#### Description
+Two scripts that interface with a simulated DNS server. One script exercises a recursive domain name lookup and the other exercises an iterative domain name lookup.
